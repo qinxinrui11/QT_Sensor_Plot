@@ -1,12 +1,6 @@
 ﻿#include "dataplotter.h"
 #include "qcustomplot.h"
 #include <QDateTime>
-#include <chrono>
-
-#define FREQUENCY_PER_SECOND 400 // 数据每秒生成的组数
-#define DATA_COUNT 100 // 每组数据的个数
-
-#define UI_REFRESH_RATE 10 // UI界面每秒更新的次数
 
 /**
  * @brief 绘图类的初始化
@@ -19,7 +13,7 @@
  * @param *parent       QWidget 父类
  * @return 无
  */
-DataPlotter::DataPlotter(QCustomPlot *customPlot, QWidget *parent) : QWidget(parent)
+DataPlotter::DataPlotter(QCustomPlot *customPlot, PlotRange range, quint8 refreshRate, bool clear_flag, QWidget *parent) : QWidget(parent)
 {
     /****************************************/
     // 定义 QCustomPlot 控件参数
@@ -30,8 +24,8 @@ DataPlotter::DataPlotter(QCustomPlot *customPlot, QWidget *parent) : QWidget(par
                          | QCP::iSelectPlottables); // 可选中曲线
 
     // 初始化 Plot 量程
-    m_customPlot->xAxis->setRange(0,100);   // X轴为时间(s)
-    m_customPlot->yAxis->setRange(-3,3);    // Y轴为加速度值(g)
+    m_customPlot->xAxis->setRange(range.xmin, range.xmax);   // X轴为时间(s)
+    m_customPlot->yAxis->setRange(range.ymin, range.ymax);    // Y轴为加速度值(g)
 
     // 创建一个新图层
     m_customPlot->addGraph();
@@ -39,17 +33,9 @@ DataPlotter::DataPlotter(QCustomPlot *customPlot, QWidget *parent) : QWidget(par
     // 初始化定时器，每隔一段时间触发绘图操作
     m_timer = new QTimer(this);
     connect(m_timer, &QTimer::timeout, this, &DataPlotter::updatePlot);
-    m_timer->start(1000 / UI_REFRESH_RATE); // 设置定时器间隔(ms)
-    /****************************************/
-    // 创建 DataGenerator 对象并连接信号
-    m_dataGenerator = new DataGenerator(FREQUENCY_PER_SECOND, DATA_COUNT, this); // 200次每秒，每次生成100个数据
-    connect(m_dataGenerator, &DataGenerator::newDataGenerated, this, &DataPlotter::dataBuffer);
+    m_timer->start(1000 / refreshRate); // 设置定时器间隔(ms)
 
-    // 开启时钟，启动数据生成
-    m_dataGenerator->start();
-    /****************************************/
-    // 开启程序运行计时器
-    m_timerMainWindow.start();
+    m_clear_flag = clear_flag;
 }
 
 /**
@@ -63,7 +49,13 @@ DataPlotter::DataPlotter(QCustomPlot *customPlot, QWidget *parent) : QWidget(par
  */
 void DataPlotter::updatePlot()
 {
+    if(m_clear_flag)
+        m_customPlot->graph(0)->data().data()->clear();
     if(!m_bufferX.isEmpty() && !m_bufferY.isEmpty()){
+        // 发送保存的数据
+        if(m_registryData.dataSave_flag)
+            emit sendSaveData(m_bufferX, m_bufferY);
+
         // 设置绘图数据
         m_customPlot->graph(0)->addData(m_bufferX, m_bufferY);
 
@@ -73,7 +65,7 @@ void DataPlotter::updatePlot()
         m_bufferX.clear();
         m_bufferY.clear();
     }else{
-        qDebug() << "buffer is empty";
+//        qDebug() << "buffer is empty";
     }
 }
 
@@ -86,23 +78,39 @@ void DataPlotter::updatePlot()
  * @param data  double 型的 QVector 数组
  * @return 无
  */
-void DataPlotter::dataBuffer(QVector<double> data)
+void DataPlotter::dataBuffer1(QVector<double> data)
 {
     // 计算x坐标（数据接收时间）(us级)
-    static auto start = std::chrono::high_resolution_clock::now();
-
     auto now = std::chrono::high_resolution_clock::now();
-    auto runningtime = std::chrono::duration_cast<std::chrono::microseconds>(now - start);
+
+    auto runningtime = std::chrono::duration_cast<std::chrono::microseconds>(now - m_startTime);
     qint64 runningTime = static_cast<quint64>(runningtime.count()); // 程序运行时间(us)
 
-    static auto last = now;
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(now - last);
-    last = now;
-    qint64 interval = static_cast<quint64>(duration.count()); // 与上一次接收的时间间隔(us)
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(now - m_lastTime);
+    qint64 interval = static_cast<quint64>(duration.count());       // 与上一次接收的时间间隔(us)
+
+    m_lastTime = now;
 
     // 将收到的数据转存到缓冲区中
-    for(int i = 0; i < data.size(); ++i){
+    for(int i = 0; i < data.size(); i++){
         m_bufferX.append(((i + 1) * (double(interval) / data.size()) + runningTime - interval) / 1000000);
         m_bufferY.append(data[i]);
+    }
+}
+
+/**
+ * @brief 接收数据并放入缓冲区
+ *
+ * 槽函数，直接接受 x 和 y 值
+ *
+ * @param data  double 型的 QVector 数组
+ * @return 无
+ */
+void DataPlotter::dataBuffer2(QVector<double> dataX, QVector<double> dataY)
+{
+    // 将收到的数据转存到缓冲区中
+    for(int i = 0; i < dataX.size(); i++){
+        m_bufferX.append(dataX[i]);
+        m_bufferY.append(dataY[i]);
     }
 }
