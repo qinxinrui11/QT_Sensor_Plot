@@ -135,7 +135,7 @@ void findHeadIndex(QVector<quint8> *data, quint8 head1, quint8 head2)
  */
 void UdpProcess::udpDataProcess(QByteArray buf)
 {
-    // 将数据从缓冲区转存到私有变量 data 中
+    // 将数据从缓冲区转存到私有变量 m_data 中
     for(int i = 0; i < buf.size(); i++)
         m_data.push_back(buf[i]);
 
@@ -157,9 +157,9 @@ void UdpProcess::udpDataProcess(QByteArray buf)
         }
 
         // 跳过前三个字节：帧头和设备号，开始存数据帧中的有效数据部分
-        m_accX.clear();
+        m_accData.clear();
         qint32 acc_x, acc_y, acc_z;
-        for(int num = 3; num < packetNums - 1; num += dataLength){
+        for(int num = 3; num < packetLength - 1; num += dataLength){
             acc_x = (m_data[num + 3] << 24) | (m_data[num + 2] << 16) | (m_data[num + 1] << 8) | (m_data[num + 0]);
             acc_y = (m_data[num + 7] << 24) | (m_data[num + 6] << 16) | (m_data[num + 5] << 8) | (m_data[num + 4]);
             acc_z = (m_data[num + 11] << 24) | (m_data[num + 10] << 16) | (m_data[num + 9] << 8) | (m_data[num + 8]);
@@ -168,15 +168,23 @@ void UdpProcess::udpDataProcess(QByteArray buf)
             m_registryData.accY = acc_y / 100000.0;
             m_registryData.accZ = acc_z / 100000.0;
 
-            m_accX.append(m_registryData.accX);
+            QVector<double> tmp;
+            tmp.append(m_registryData.accX);
+            tmp.append(m_registryData.accY);
+            tmp.append(m_registryData.accZ);
+            m_accData.append(tmp);
+
+            m_registryData.udpData++;
         }
         // 发送一包有效数据，去画图
-        emit sendAccX(m_accX);
+        emit sendAccData(m_accData);
 
         // 从私有变量中弹出处理完的数据
         for(int i = 0; i < packetLength; i++)
             m_data.pop_front();
 
+        // 记录解码出的有效包
+        m_registryData.udpN++;
     }
 }
 

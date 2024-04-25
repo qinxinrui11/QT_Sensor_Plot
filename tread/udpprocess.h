@@ -25,7 +25,7 @@ private:
 
     QByteArray udpReceiveBuffer[UDP_BUFFER_SIZE];   // UDP 接收数据缓存区
     QVector<quint8> m_data;                         // UDP 数据解析区
-    QVector<double> m_accX;                         // 一包有效数据
+    QVector<QVector<double>> m_accData;             // 一包有效数据
 
     My_HostAddress m_self;
     My_HostAddress m_target;
@@ -42,7 +42,7 @@ private slots:
 signals:
     void udpData(QByteArray buf);                   // UDP 数据解码（校验、提取等）
     void udpSendMessageBox(QString type, QString context);// 报警框信息
-    void sendAccX(QVector<double> accx);            // 发送解码后的有效数据
+    void sendAccData(QVector<QVector<double>> data);// 发送解码后的有效数据
     void UDPConnectFailed();                        // UDP 连接失败的信号
 };
 

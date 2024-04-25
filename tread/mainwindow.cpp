@@ -25,6 +25,12 @@ MainWindow::MainWindow(QWidget *parent)
 {
     ui->setupUi(this);
 
+    // 界面初始化
+    // 设置主场景应用图标
+//    setWindowIcon(QPixmap(":/HTLEFT.png"));
+    // 设置窗口标题
+    setWindowTitle("轨道探伤车振动测量分析系统");
+
     // 开启记录程序运行时间
     m_elapsedTimer.start();
 
@@ -34,23 +40,27 @@ MainWindow::MainWindow(QWidget *parent)
     Modifyregistry();
 
     // 程序数据初始化配置
-    m_registryData.FREQUENCY_PER_SECOND = 200;  // 数据每秒生成的组数
-    m_registryData.DATA_COUNT = 100;            // 每组数据的个数
-    m_registryData.T = 12000;                   // 三角函数的周期，等于 FREQUENCY_PER_SECOND * DATA_COUNT 时1s能绘制一个周期
-    m_registryData.FFT_N = 2000;                // FFT 变换所需的数据量
-    m_registryData.FFT_F = m_registryData.FREQUENCY_PER_SECOND * m_registryData.DATA_COUNT; // FFT 输入数据的频率
+//    m_registryData.FREQUENCY_PER_SECOND = 200;  // 数据每秒生成的组数
+//    m_registryData.DATA_COUNT = 100;            // 每组数据的个数
+//    m_registryData.T = 12000;                   // 三角函数的周期，等于 FREQUENCY_PER_SECOND * DATA_COUNT 时1s能绘制一个周期
+//    m_registryData.FFT_F = m_registryData.FREQUENCY_PER_SECOND * m_registryData.DATA_COUNT; // FFT 输入数据的频率
+    m_registryData.FFT_N = 200;                 // FFT 变换所需的数据量
+    m_registryData.FFT_F = workFreq_map[m_registryData.workFreqIndex];// FFT 变换基本频率，同通信频率
     m_registryData.udpPacket = 0;               // UDP 接收报文总数复位
-    m_registryData.udpN = 0;                    // UDP 接收报文有效数复位
+    m_registryData.udpN = 0;                    // UDP 接收报文有效数总数复位
+    m_registryData.udpData = 0;                 // UDP 接收的有效数据总数复位
     m_registryData.timeRange.xmin = 0;          // 图像坐标范围
     m_registryData.timeRange.xmax = 60;
     m_registryData.timeRange.ymin = -accRange_map[m_registryData.accRangeIndex];
     m_registryData.timeRange.ymax = accRange_map[m_registryData.accRangeIndex];
-    m_registryData.freqRange.xmin = 0;
-    m_registryData.freqRange.xmax = 10000;
-    m_registryData.freqRange.ymin = 0;
-    m_registryData.freqRange.ymax = accRange_map[m_registryData.accRangeIndex];
+    m_registryData.freqRange.xmin = 0 - 0.05 * m_registryData.FFT_F;
+    m_registryData.freqRange.xmax = 0.55 * m_registryData.FFT_F;
+    m_registryData.freqRange.ymin = 0 - 0.25;
+    m_registryData.freqRange.ymax = accRange_map[m_registryData.accRangeIndex] + 0.5;
     m_registryData.UDPConnect_flag = false;     // 默认 UDP 不连接
     m_registryData.dataSave_flag = false;       // 默认数据不保存
+    m_registryData.dataAverage_flag = false;    // 默认数据不均值
+    m_registryData.startFFT_flag = false;       // 默认 FFT 不运算
 
     // 创建一个定时器，记录程序运行时间
     m_timer = new QTimer();
@@ -72,7 +82,7 @@ MainWindow::MainWindow(QWidget *parent)
 #ifndef GENERATE_DATA
     // UDP 数据处理对象
     m_udpProcess = new UdpProcess(m_registryData.self);
-    connect(m_udpProcess, &UdpProcess::sendAccX, m_dataPlotter, &DataPlotter::dataBuffer1);
+    connect(m_udpProcess, &UdpProcess::sendAccData, m_dataPlotter, &DataPlotter::dataBuffer);
     connect(m_udpProcess, &UdpProcess::udpSendMessageBox, this, &MainWindow::showMessageBox);  // 报警框
     connect(m_udpProcess, &UdpProcess::UDPConnectFailed, [&]() {ui->startUDP_pushButton->setText("开始通讯");});
 #endif
@@ -88,14 +98,14 @@ MainWindow::MainWindow(QWidget *parent)
     m_fftProcess = new FftProcess(&m_registryData.FFT_N, &m_registryData.FFT_F);
     // 开启新线程
     // 注册 QVector<double> 类型
-    qRegisterMetaType<QVector<double>>("QVector<double>");
+    qRegisterMetaType<QVector<double>>("QVector<QVector<double>>");
     m_threadFFT = new QThread();
     m_fftProcess->moveToThread(m_threadFFT);
 #ifdef GENERATE_DATA
     connect(m_dataGenerator, &DataGenerator::newDataGenerated, m_fftProcess, &FftProcess::FftCalculate);
 #endif
 #ifndef GENERATE_DATA
-    connect(m_udpProcess, &UdpProcess::sendAccX, m_fftProcess, &FftProcess::FftCalculate);
+    connect(m_udpProcess, &UdpProcess::sendAccData, m_fftProcess, &FftProcess::FftCalculate);
 #endif
     connect(m_fftProcess, &FftProcess::FftResult, m_freqPlotter, &DataPlotter::dataBuffer2);
     m_threadFFT->start();
@@ -107,7 +117,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_uiEventHandler, &UIEventHandler::UDPSendStart, m_udpProcess, &UdpProcess::startSend);     // UDP 开启通讯
     connect(m_uiEventHandler, &UIEventHandler::UDPSendStop, m_udpProcess, &UdpProcess::stopSend);       // UDP 暂停通讯
     connect(m_uiEventHandler, &UIEventHandler::sendCommand, m_udpProcess, &UdpProcess::sendCommand);    // 下位机指令配置
-    connect(m_dataPlotter, &DataPlotter::sendSaveData, m_uiEventHandler, &UIEventHandler::dataSave);    // 数据保存
+    connect(m_dataPlotter, &DataPlotter::sendData, m_uiEventHandler, &UIEventHandler::dataReceive);     // 数据接收处理
 }
 
 MainWindow::~MainWindow()

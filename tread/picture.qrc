@@ -1,0 +1,7 @@
+<RCC>
+    <qresource prefix="/">
+        <file>HTLOGO.ico</file>
+        <file>logo.png</file>
+        <file>HT_LEFT.png</file>
+    </qresource>
+</RCC>

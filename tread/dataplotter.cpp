@@ -16,19 +16,38 @@
 DataPlotter::DataPlotter(QCustomPlot *customPlot, PlotRange range, quint8 refreshRate, bool clear_flag, QWidget *parent) : QWidget(parent)
 {
     /****************************************/
-    // 定义 QCustomPlot 控件参数
     m_customPlot = customPlot;
-    m_customPlot->setInteractions(QCP::iRangeDrag   // 可平移
-                         | QCP::iRangeZoom          // 可滚轮缩放
-                         | QCP::iSelectLegend       // 可选中图例
-                         | QCP::iSelectPlottables); // 可选中曲线
 
     // 初始化 Plot 量程
-    m_customPlot->xAxis->setRange(range.xmin, range.xmax);   // X轴为时间(s)
+    m_customPlot->xAxis->setRange(range.xmin, range.xmax);    // X轴为时间(s)
     m_customPlot->yAxis->setRange(range.ymin, range.ymax);    // Y轴为加速度值(g)
 
     // 创建一个新图层
     m_customPlot->addGraph();
+    m_customPlot->addGraph();
+    m_customPlot->addGraph();
+
+    // 设置曲线颜色,宽度（也可以设置类型）
+    QPen pen;
+    pen.setWidth(1);
+    pen.setColor(Qt::blue);
+    m_customPlot->graph(0)->setPen(pen); // line color blue for first graph
+    pen.setColor(Qt::red);
+    m_customPlot->graph(1)->setPen(pen); // line color red for second graph
+    pen.setColor(Qt::green);
+    m_customPlot->graph(2)->setPen(pen); // line color green for third graph
+
+    // 设置图例
+    m_customPlot->graph(0)->setName("Ax");
+    m_customPlot->graph(1)->setName("Ay");
+    m_customPlot->graph(2)->setName("Az");
+    m_customPlot->legend->setVisible(true);
+
+    // 定义 QCustomPlot 控件参数
+    m_customPlot->setInteractions(QCP::iRangeDrag   // 可平移
+                         | QCP::iRangeZoom          // 可滚轮缩放
+                         | QCP::iSelectLegend       // 可选中图例
+                         | QCP::iSelectPlottables); // 可选中曲线
     /****************************************/
     // 初始化定时器，每隔一段时间触发绘图操作
     m_timer = new QTimer(this);
@@ -49,15 +68,28 @@ DataPlotter::DataPlotter(QCustomPlot *customPlot, PlotRange range, quint8 refres
  */
 void DataPlotter::updatePlot()
 {
-    if(m_clear_flag)
+    if(m_clear_flag){
         m_customPlot->graph(0)->data().data()->clear();
-    if(!m_bufferX.isEmpty() && !m_bufferY.isEmpty()){
-        // 发送保存的数据
-        if(m_registryData.dataSave_flag)
-            emit sendSaveData(m_bufferX, m_bufferY);
-
+        m_customPlot->graph(1)->data().data()->clear();
+        m_customPlot->graph(2)->data().data()->clear();
+    }
+    if(!m_bufferX.isEmpty() && (!m_bufferY.isEmpty())){
         // 设置绘图数据
-        m_customPlot->graph(0)->addData(m_bufferX, m_bufferY);
+        if(m_bufferY.size()){
+            QVector<double> accx, accy, accz;
+            for(auto it : m_bufferY){
+                accx.append(it[0]);
+                accy.append(it[1]);
+                accz.append(it[2]);
+            }
+            m_customPlot->graph(0)->addData(m_bufferX, accx);
+            m_customPlot->graph(1)->addData(m_bufferX, accy);
+            m_customPlot->graph(2)->addData(m_bufferX, accz);
+        }
+
+        // 发送保存的数据
+        if(m_registryData.dataSave_flag || m_registryData.dataAverage_flag || m_registryData.autoAverage_flag)
+            emit sendData(m_bufferX, m_bufferY);
 
         // 重新绘制
         m_customPlot->replot();
@@ -78,7 +110,7 @@ void DataPlotter::updatePlot()
  * @param data  double 型的 QVector 数组
  * @return 无
  */
-void DataPlotter::dataBuffer1(QVector<double> data)
+void DataPlotter::dataBuffer(QVector<QVector<double>> data)
 {
     // 计算x坐标（数据接收时间）(us级)
     auto now = std::chrono::high_resolution_clock::now();
@@ -106,11 +138,15 @@ void DataPlotter::dataBuffer1(QVector<double> data)
  * @param data  double 型的 QVector 数组
  * @return 无
  */
-void DataPlotter::dataBuffer2(QVector<double> dataX, QVector<double> dataY)
+void DataPlotter::dataBuffer2(QVector<double> dataX, QVector<QVector<double>> dataY)
 {
     // 将收到的数据转存到缓冲区中
     for(int i = 0; i < dataX.size(); i++){
         m_bufferX.append(dataX[i]);
-        m_bufferY.append(dataY[i]);
+        QVector<double> tmp;
+        tmp.append(dataY[i][0]);
+        tmp.append(dataY[i][1]);
+        tmp.append(dataY[i][2]);
+        m_bufferY.append(tmp);
     }
 }

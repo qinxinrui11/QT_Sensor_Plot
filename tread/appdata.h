@@ -13,7 +13,7 @@
 #define KEY_DEAD_FREQUENCY  "deadFrequency"
 #define KEY_ACC_RANGE       "accRange"
 
-#define PLOT_REFRESH_RATE 25       // Plot 每秒更新的次数
+#define PLOT_REFRESH_RATE 40       // Plot 每秒更新的次数
 #define WIDGET_REFRESH_RATE 25     // UI 控件每秒更新的次数
 
 extern float workFreq_map[8];
@@ -56,11 +56,17 @@ struct RegistryData{
 
     quint32 udpPacket;              // UDP 接收到的报文总数
     quint32 udpN;                   // UDP 接收到的有效报文数
+    quint32 udpData;                // UDP 接收到的有效数据总数
     quint32 saveN;                  // 保存的有效数据组数
+    quint32 averageN;               // 数据均值所用的数据组数
+    quint32 autoAverageN;           // 自动均值所用的数据组数
     /**************************************************/
     // 状态位
     bool UDPConnect_flag;           // UDP 是否连接的标志位
     bool dataSave_flag;             // 开始数据保存的标志位
+    bool dataAverage_flag;          // 开始数据均值的标志位
+    bool autoAverage_flag;          // 开始自动均值的标志位
+    bool startFFT_flag;             // 开启 FFT 运算及绘图的标志位
 };
 
 extern RegistryData m_registryData;

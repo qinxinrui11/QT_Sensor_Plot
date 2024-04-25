@@ -23,7 +23,7 @@ public slots:
     void ComboBoxValueChanged();                                    // 通过 ComboBox 改变内部参数的槽函数
     void SliderValueChanged(int value);                             // 通过 Slider 改变图像范围的槽函数
     void PushButtonValueChanged();                                  // 通过 PushButton 按钮改变内部执行状态
-    void dataSave(QVector<double> dataX, QVector<double> dataY);    // 数据保存
+    void dataReceive(QVector<double> dataX, QVector<QVector<double>> dataY); // 数据接收处理
 
 private:
     Ui::MainWindow *m_ui;
@@ -34,10 +34,18 @@ private:
 
     QTimer *m_timer;                                        // UI 刷新的定时器对象
     QTimer *save_timer;                                     // 记录数据保存时间的定时器对象
+    QTimer *average_timer;                                  // 记录数据均值时间的定时器对象
+    QTimer *autoAverage_timer;                              // 记录自动均值时间的定时器对象
 
     QFile m_file;                                           // 数据保存的文件对象
+    QFile m_autoAveragefile;                                // 自动均值的文件对象
 
     quint32 save_seconds;                                   // 数据保存的时间(s)
+    quint32 average_seconds;                                // 数据均值的时间(s)
+    quint32 autoAverage_seconds;                            // 自动均值的时间(s)
+    double averageX;                                        // 数据均值累加变量
+    double averageY;
+    double averageZ;
 
 private:
     void ModifyParameter();                                 // 参数初始化

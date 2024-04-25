@@ -21,9 +21,17 @@ UIEventHandler::UIEventHandler(Ui::MainWindow *ui, quint8 refreshRate, MainWindo
     connect(m_timer, &QTimer::timeout, this, &UIEventHandler::updateUI);
     m_timer->start(1000 / refreshRate); // 设置定时器间隔(ms)
     // 初始化数据保存的定时器，在数据保存过程中每秒计时
+    save_seconds = 0;
     save_timer = new QTimer(this);
     connect(save_timer, &QTimer::timeout, this, [&](){save_seconds++;});
-    save_seconds = 0;
+    // 初始化数据均值的定时器，在数据均值过程中每秒计时
+    average_seconds = 0;
+    average_timer = new QTimer(this);
+    connect(average_timer, &QTimer::timeout, this, [&](){average_seconds++;});
+    // 初始化自动均值的定时器，在数据均值过程中每秒计时
+    autoAverage_seconds = 0;
+    autoAverage_timer = new QTimer(this);
+    connect(autoAverage_timer, &QTimer::timeout, this, [&](){autoAverage_seconds++;});
 }
 
 /**
@@ -38,10 +46,7 @@ UIEventHandler::UIEventHandler(Ui::MainWindow *ui, quint8 refreshRate, MainWindo
 void UIEventHandler::ModifyParameter()
 {
     // 所有 scroll 滚动条的信号连接
-    connect(m_ui->num_scroll, &QScrollBar::valueChanged, this, &UIEventHandler::ScrollBarValueChanged);
-    connect(m_ui->frequency_scroll, &QScrollBar::valueChanged, this, &UIEventHandler::ScrollBarValueChanged);
-    connect(m_ui->count_scroll, &QScrollBar::valueChanged, this, &UIEventHandler::ScrollBarValueChanged);
-    connect(m_ui->fftCount_scroll, &QScrollBar::valueChanged, this, &UIEventHandler::ScrollBarValueChanged);
+    connect(m_ui->FFTNum_scroll, &QScrollBar::valueChanged, this, &UIEventHandler::ScrollBarValueChanged);
 
     // 所有 lineEdit 的初始化
     m_ui->selfIP_lineEdit->setText(m_registryData.self.IP);
@@ -56,7 +61,7 @@ void UIEventHandler::ModifyParameter()
     // 所有 ComboBox 的初始化
     m_ui->workFreq_comboBox->setCurrentIndex(m_registryData.workFreqIndex); // 设置默认选择第一个选项
     m_ui->deadFreq_comboBox->setCurrentIndex(m_registryData.deadFreqIndex); // 设置默认选择第一个选项
-    m_ui->range_comboBox->setCurrentIndex(m_registryData.accRangeIndex); // 设置默认选择第一个选项
+    m_ui->range_comboBox->setCurrentIndex(m_registryData.accRangeIndex);    // 设置默认选择第一个选项
     connect(m_ui->workFreq_comboBox, static_cast<void(QComboBox::*)(int)>(&QComboBox::currentIndexChanged), this, &UIEventHandler::ComboBoxValueChanged);
     connect(m_ui->deadFreq_comboBox, static_cast<void(QComboBox::*)(int)>(&QComboBox::currentIndexChanged), this, &UIEventHandler::ComboBoxValueChanged);
     connect(m_ui->range_comboBox, static_cast<void(QComboBox::*)(int)>(&QComboBox::currentIndexChanged), this, &UIEventHandler::ComboBoxValueChanged);
@@ -68,17 +73,23 @@ void UIEventHandler::ModifyParameter()
     // 所有 PushButton 的初始化
     connect(m_ui->modifyIP_pushButton, &QPushButton::clicked, this, &UIEventHandler::PushButtonValueChanged);
     connect(m_ui->startUDP_pushButton, &QPushButton::clicked, this, &UIEventHandler::PushButtonValueChanged);
+    connect(m_ui->resetUDP_pushButton, &QPushButton::clicked, this, &UIEventHandler::PushButtonValueChanged);
     connect(m_ui->dataSave_pushButton, &QPushButton::clicked, this, &UIEventHandler::PushButtonValueChanged);
+    connect(m_ui->dataAverage_pushButton, &QPushButton::clicked, this, &UIEventHandler::PushButtonValueChanged);
+    connect(m_ui->autoAverage_pushButton, &QPushButton::clicked, this, &UIEventHandler::PushButtonValueChanged);
     connect(m_ui->plotClear_pushButton, &QPushButton::clicked, this, &UIEventHandler::PushButtonValueChanged);
+    connect(m_ui->startFFT_pushButton, &QPushButton::clicked, this, &UIEventHandler::PushButtonValueChanged);
 
     // lcdNumber 的初始化
     m_ui->dataSave_lcdNumber->display("00:00:00");
+    m_ui->dataAverage_lcdNumber->display("00:00:00");
+    m_ui->autoAverage_lcdNumber->display("00:00:00");
 }
 
 /**
  * @brief
  *
- * 该槽函数用于数据的在线改值响应
+ * 该槽函数用于通过 Scroll 滚动体对数据进行在线的改值响应
  * 读取对应更改的值，更改到全局变量 m_registryData 中
  *
  * @param int value
@@ -91,24 +102,9 @@ void UIEventHandler::ScrollBarValueChanged(int value)
         return;
     }
 
-    if(scrollBar == m_ui->num_scroll){
+    if(scrollBar == m_ui->FFTNum_scroll){
 //        qDebug() << "ScrollBar: change num:" << value;
-        m_registryData.T = value;
-    }
-    else if(scrollBar == m_ui->frequency_scroll){
-//        qDebug() << "ScrollBar: change frequency:" << value;
-        m_registryData.FREQUENCY_PER_SECOND = value;
-        m_registryData.FFT_F = m_registryData.FREQUENCY_PER_SECOND * m_registryData.DATA_COUNT; // FFT 输入数据的频率
-        m_mainWindow->m_dataGenerator->start();
-    }
-    else if(scrollBar == m_ui->count_scroll){
-//        qDebug() << "ScrollBar: change count:" << value;
-        m_registryData.DATA_COUNT = value;
-        m_registryData.FFT_F = m_registryData.FREQUENCY_PER_SECOND * m_registryData.DATA_COUNT; // FFT 输入数据的频率
-    }
-    else if(scrollBar == m_ui->fftCount_scroll){
-//            qDebug() << "ScrollBar: change fftCount:" << value;
-            m_registryData.FFT_N = value;
+        m_registryData.FFT_N = value;
     }
 }
 
@@ -229,8 +225,9 @@ void UIEventHandler::ComboBoxValueChanged()
 
     if(comboBox == m_ui->workFreq_comboBox){
         qDebug() << "选择通信频率：" << workFreq_map[comboBoxIndex] << "Hz";
-        m_registryData.workFreqIndex = comboBoxIndex;
         if(m_registryData.UDPConnect_flag){
+            m_registryData.workFreqIndex = comboBoxIndex;
+            m_registryData.FFT_F = workFreq_map[m_registryData.workFreqIndex];
             QByteArray sendArray(1,'A'+comboBoxIndex);
             sendArray = "$$"+sendArray;
             emit sendCommand(sendArray, m_registryData.self, m_registryData.target);
@@ -239,14 +236,16 @@ void UIEventHandler::ComboBoxValueChanged()
             m_mainWindow->m_setting->setValue(KEY_WORK_FREQUENCY, QString::number(comboBoxIndex));
         }
         else{
-            emit UISendMessageBox("警告", "请先打开网络通信再配置参数！");
+            m_ui->workFreq_comboBox->setCurrentIndex(m_registryData.workFreqIndex); // 设置默认选择第一个选项
+            if(m_registryData.workFreqIndex != comboBoxIndex)
+                emit UISendMessageBox("警告", "请先打开网络通信再配置参数！");
         }
     }
 
     else if(comboBox == m_ui->deadFreq_comboBox){
         qDebug() << "选择滤波截止频率：" << deadFreq_map[comboBoxIndex] << "Hz";
-        m_registryData.deadFreqIndex = comboBoxIndex;
         if(m_registryData.UDPConnect_flag){
+            m_registryData.deadFreqIndex = comboBoxIndex;
             QByteArray sendArray(1,'a'+comboBoxIndex);
             sendArray = "$$9"+sendArray;
             emit sendCommand(sendArray, m_registryData.self, m_registryData.target);
@@ -255,7 +254,9 @@ void UIEventHandler::ComboBoxValueChanged()
             m_mainWindow->m_setting->setValue(KEY_DEAD_FREQUENCY, QString::number(comboBoxIndex));
         }
         else{
-            emit UISendMessageBox("警告", "请先打开网络通信再配置参数！");
+            m_ui->deadFreq_comboBox->setCurrentIndex(m_registryData.deadFreqIndex); // 设置默认选择第一个选项
+            if(m_registryData.deadFreqIndex != comboBoxIndex)
+                emit UISendMessageBox("警告", "请先打开网络通信再配置参数！");
         }
     }
 
@@ -384,11 +385,11 @@ void UIEventHandler::PushButtonValueChanged()
         }
     }
 
-    // 数据保存按钮
+    // 数据保存按钮，通讯中断时不可开始保存，但可结束保存
     else if(pushButton == m_ui->dataSave_pushButton){
-        if(m_registryData.UDPConnect_flag){
-            QString value = pushButton->text();
-            if(value == "数据保存"){
+        QString value = pushButton->text();
+        if(value == "数据保存"){
+            if(m_registryData.UDPConnect_flag){
                 qDebug() << "按下dataSave_pushButton，开始保存";
                 QString fileName = QDateTime::currentDateTime().toString("yyyy.MM.dd.hh.mm.ss.zzz") + ".txt";
                 m_file.setFileName(fileName);
@@ -398,32 +399,119 @@ void UIEventHandler::PushButtonValueChanged()
                     m_registryData.saveN = 0;   // 存入数据清零
                     pushButton->setText("结束保存");
                     m_registryData.dataSave_flag = true;
-                    // 写入表头
-                    QTextStream m_textStream(&m_file);
-                    QString writeForm = QString("时间戳(s) 程序运行时间(s) 加表x(g) 加表y(g) 加表z(g)\n");
-                    m_textStream << writeForm;
+//                    // 写入表头
+//                    QTextStream m_textStream(&m_file);
+//                    QString writeForm = QString("程序运行时间(s) 加表x(g) 加表y(g) 加表z(g)\n");
+//                    m_textStream << writeForm;
                     // 开始数据保存计时
                     save_timer->start(1000);
                 }
-            }else if(value == "结束保存"){
-                qDebug() << "按下dataSave_pushButton，结束保存";
-                pushButton->setText("数据保存");
-                m_registryData.dataSave_flag = false;
-                save_timer->stop();
-                emit UISendMessageBox("数据保存", QString("用时%1s，存入%2组数据，文件名" + m_file.fileName()).arg(save_seconds).arg(m_registryData.saveN));  // 加入文件路径显示
-                save_seconds = 0;
-                m_file.close();
-            }
+            }else
+                emit UISendMessageBox("警告", "请先打开网络通信再保存数据！");
+        }else if(value == "结束保存"){
+            qDebug() << "按下dataSave_pushButton，结束保存";
+            pushButton->setText("数据保存");
+            m_registryData.dataSave_flag = false;
+            save_timer->stop();
+            emit UISendMessageBox("数据保存", QString("用时%1s，存入%2组数据，文件名" + m_file.fileName()).arg(save_seconds).arg(m_registryData.saveN));  // 加入文件路径显示
+            save_seconds = 0;
+            m_registryData.saveN = 0;
+            m_file.close();
         }
-        else
-            emit UISendMessageBox("警告", "请先打开网络通信再保存数据！");
     }
 
-    // 图像清空按钮
+    // 数据均值按钮，参考数据保存的结构
+    else if(pushButton == m_ui->dataAverage_pushButton){
+        QString value = pushButton->text();
+        if(value == "数据均值"){
+            if(m_registryData.UDPConnect_flag){
+                qDebug() << "按下dataAverage_pushButton，开始均值";
+                m_registryData.averageN = 0;   // 存入数据清零
+                averageX = 0;
+                averageY = 0;
+                averageZ = 0;
+                pushButton->setText("结束均值");
+                m_registryData.dataAverage_flag = true;
+                // 开始数据均值计时
+                average_timer->start(1000);
+            }else
+                emit UISendMessageBox("警告", "请先打开网络通信再进行数据均值！");
+        }else if(value == "结束均值"){
+            qDebug() << "按下dataAverage_pushButton，结束均值";
+            pushButton->setText("数据均值");
+            m_registryData.dataAverage_flag = false;
+            average_timer->stop();
+            averageX /= m_registryData.averageN;
+            averageY /= m_registryData.averageN;
+            averageZ /= m_registryData.averageN;
+            emit UISendMessageBox("数据均值", QString("用时%1s，共用%2组数据，均值结果：x:%3,y:%4,z:%5").arg(average_seconds).arg(m_registryData.averageN).arg(averageX).arg(averageY).arg(averageZ));  // 加入文件路径显示
+            average_seconds = 0;
+            m_registryData.averageN = 0;
+        }
+    }
+
+    // 数据均值按钮，参考数据保存的结构
+    else if(pushButton == m_ui->autoAverage_pushButton){
+        QString value = pushButton->text();
+        if(value == "开始自动均值"){
+            if(m_registryData.UDPConnect_flag){
+                qDebug() << "点击autoAverage_pushButton，开始自动均值";
+                QString fileName = "auto" + QDateTime::currentDateTime().toString("yyyy.MM.dd.hh.mm.ss") + ".txt";
+                m_autoAveragefile.setFileName(fileName);
+                if(!m_autoAveragefile.open(QIODevice::WriteOnly | QIODevice::Text)){
+                    emit UISendMessageBox("错误", "打开文件失败");
+                }else{
+                    m_registryData.autoAverageN = 0;   // 存入数据清零
+                    pushButton->setText("结束自动均值");
+                    m_registryData.autoAverage_flag = true;
+//                    // 写入表头
+//                    QTextStream m_textStream(&m_file);
+//                    QString writeForm = QString("程序运行时间(s) 加表x(g) 加表y(g) 加表z(g)\n");
+//                    m_textStream << writeForm;
+                    // 开始数据均值计时
+                    autoAverage_timer->start(1000);
+                }
+            }else
+                emit UISendMessageBox("警告", "请先打开网络通信再进行数据均值！");
+        }else if(value == "结束自动均值"){
+            qDebug() << "点击autoAverage_pushButton，结束自动均值";
+            pushButton->setText("开始自动均值");
+            m_registryData.autoAverage_flag = false;
+            autoAverage_timer->stop();
+            emit UISendMessageBox("数据自动均值", QString("用时%1s，共存%2组数据，文件名" + m_autoAveragefile.fileName()).arg(autoAverage_seconds).arg(m_registryData.autoAverageN));
+            autoAverage_seconds = 0;
+            m_registryData.autoAverageN = 0;
+            m_autoAveragefile.close();
+        }
+    }
+
+    // 复位 UDP 接收数据统计
+    else if(pushButton == m_ui->resetUDP_pushButton){
+        m_registryData.udpPacket = 0;               // UDP 接收报文总数复位
+        m_registryData.udpN = 0;                    // UDP 接收报文有效数总数复位
+        m_registryData.udpData = 0;                 // UDP 接收的有效数据总数复位
+    }
+
+    // 时域图像清空按钮
     else if(pushButton == m_ui->plotClear_pushButton){
         m_ui->time_plot->graph(0)->data().data()->clear();
+        m_ui->time_plot->graph(1)->data().data()->clear();
+        m_ui->time_plot->graph(2)->data().data()->clear();
     }
 
+    // 频域图像绘制按钮
+    else if(pushButton == m_ui->startFFT_pushButton){
+        QString value = pushButton->text();
+        if(value == "绘制图像"){
+            qDebug() << "按下startFFT_pushButton，开始FFT";
+            m_registryData.startFFT_flag = true;
+            pushButton->setText("暂停图像");
+        }else if(value == "暂停图像"){
+            qDebug() << "按下startFFT_pushButton，暂停FFT";
+            m_registryData.startFFT_flag = false;
+            pushButton->setText("绘制图像");
+        }
+    }
 }
 
 /**
@@ -459,44 +547,84 @@ void lcdShowTime(QLCDNumber *m_lcdNumber, quint32 seconds)
 void UIEventHandler::updateUI()
 {
     // 数据更新
-    m_ui->num_label->setText(QString("三角函数周期内的数据点个数: %1").arg(m_registryData.T));
-    m_ui->frequency_label->setText(QString("数据每秒生成组数: %1").arg(m_registryData.FREQUENCY_PER_SECOND));
-    m_ui->count_label->setText(QString("数据每组生成个数: %1").arg(m_registryData.DATA_COUNT));
-    m_ui->fftCount_label->setText(QString("FFT 输入数据量: %1").arg(m_registryData.FFT_N));
-    m_ui->fftFrequency_label->setText(QString("FFT 基本频率: %1 Hz").arg(m_registryData.FFT_F));
-    m_ui->realFrequency_label->setText(QString("三角函数的实际频率: %1 Hz").arg(m_registryData.FFT_F / m_registryData.T));
-    m_ui->realT_label->setText(QString("三角函数的实际周期: %1 s").arg(m_registryData.T / m_registryData.FFT_F));
-    m_ui->udpReceive_label->setText(QString("报文接收总数: %1").arg(m_registryData.udpPacket));
+    m_ui->udpReceive_label->setText(QString("UDP接收次数: %1").arg(m_registryData.udpPacket));
+    m_ui->udpN_label->setText(QString("有效报文总数: %1").arg(m_registryData.udpN));
+    m_ui->udpData_label->setText(QString("有效数据总数: %1").arg(m_registryData.udpData));
     m_ui->accX_label->setText(QString("X轴：%1").arg(m_registryData.accX));
     m_ui->accY_label->setText(QString("Y轴：%1").arg(m_registryData.accY));
     m_ui->accZ_label->setText(QString("Z轴：%1").arg(m_registryData.accZ));
+    m_ui->FFTNum_label->setText(QString("FFT运算数据量：%1").arg(m_registryData.FFT_N));
+    m_ui->dataSaveNum_label->setText(QString("数据保存组数：%1").arg(m_registryData.saveN));
+    m_ui->dataAverageNum_label->setText(QString("均值所用数据组数：%1").arg(m_registryData.averageN));
+    m_ui->autoAverageNum_label->setText(QString("自动保存每秒均值数据，已存组数：%1").arg(m_registryData.autoAverageN));
     // 计数时间更新
     lcdShowTime(m_ui->dataSave_lcdNumber, save_seconds);
-//    lcdShowTime(m_ui->dataSave_lcdNumber, average_seconds);
+    lcdShowTime(m_ui->dataAverage_lcdNumber, average_seconds);
+    lcdShowTime(m_ui->autoAverage_lcdNumber, autoAverage_seconds);
 }
 
 /**
  * @brief
  *
- * 该槽函数用于数据保存
- * dataX 对应有效数据，dataY 对应保存时间，目前采用的时间格式是程序运行时间，double型，每个点的时间都不同
+ * 该槽函数用于数据保存、数据均值和自动均值等功能
+ * dataX 对应保存时间，dataY 对应有效数据，目前采用的时间格式是程序运行时间，double型，每个点的时间都不同
  * 将数据按指定格式保存成 QString 格式，写入文件
- * 该槽函数目前被 dataPlotter 中的 UI 刷新函数调用，频率不高
- * 后续考虑加入时间戳
+ * 加入时间戳的话，在高频通信下对程序实时性影响很大，暂时没加
  *
  * @param 无
  * @return 无
  */
-void UIEventHandler::dataSave(QVector<double> dataX, QVector<double> dataY)
+void UIEventHandler::dataReceive(QVector<double> dataX, QVector<QVector<double>> dataY)
 {
-    QTextStream m_textStream(&m_file);
-    for(int i = 0; i < dataX.size(); i++){
-        m_registryData.saveN++;
-        // 获取当前时间戳
-        QDateTime current_date_time = QDateTime::currentDateTime();
-        QString current_date = current_date_time.toString("yyyy.MM.dd.hh.mm.ss.zzz");
-        // 写入一行数据
-        QString writeForm = QString(current_date + " %1 %2\n").arg(dataX[i]).arg(dataY[i]);
-        m_textStream << writeForm;
+    // 数据保存
+    if(m_registryData.dataSave_flag){
+        QTextStream m_textStream(&m_file);
+        for(int i = 0; i < dataX.size(); i++){
+            m_registryData.saveN++;
+
+//            // 获取当前时间戳，这个太占时间了，20kHz下会严重丢数（25%），不必要不添加
+//            QDateTime current_date_time = QDateTime::currentDateTime();
+//            QString current_date = current_date_time.toString("yyyy.MM.dd.hh.mm.ss");
+            // 写入一行数据
+            QString writeForm = QString("%1 %2 %3 %4\n").arg(dataY[i][0]).arg(dataY[i][1]).arg(dataY[i][2]).arg(dataX[i]);
+            m_textStream << writeForm;
+        }
+    }
+
+    // 数据均值
+    if(m_registryData.dataAverage_flag){
+        for(int i = 0; i < dataX.size(); i++){
+            m_registryData.averageN++;
+            averageX += dataY[i][0];
+            averageY += dataY[i][1];
+            averageZ += dataY[i][2];
+        }
+    }
+
+    // 数据自动均值
+    if(m_registryData.autoAverage_flag){
+        static int autoAverageN = 1;
+        static int usingTime = floor(dataX[0]);
+        static double accX = dataY[0][0], accY = dataY[0][1], accZ = dataY[0][2];
+        for(int i = 1; i < dataX.size(); i++){
+            int timeIndex = floor(dataX[i]);
+            if(timeIndex == usingTime){
+                autoAverageN++;
+                accX += dataY[i][0];
+                accY += dataY[i][1];
+                accZ += dataY[i][2];
+            }else{
+                accX /= autoAverageN;
+                accY /= autoAverageN;
+                accZ /= autoAverageN;
+                // 写入一秒的均值数据
+                QTextStream m_textStream(&m_autoAveragefile);
+                QString writeForm = QString("%1 %2 %3 %4\n").arg(usingTime).arg(accX).arg(accY).arg(accZ);
+                m_textStream << writeForm;
+                m_registryData.autoAverageN++;
+                autoAverageN = 1;
+                usingTime = timeIndex;
+            }
+        }
     }
 }
